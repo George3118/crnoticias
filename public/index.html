@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Post Manager</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2rem;
+      max-width: 600px;
+    }
+    form {
+      margin-bottom: 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    input, textarea, button {
+      padding: 0.5rem;
+      font-size: 1rem;
+    }
+    .post-card {
+      border: 1px solid #ccc;
+      padding: 1rem;
+      margin-bottom: 1rem;
+      border-radius: 8px;
+      background-color: #f9f9f9;
+    }
+    .post-actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <h2>Login</h2>
+  <form id="loginForm">
+    <input type="text" id="loginUser" placeholder="Username" required />
+    <input type="password" id="loginPass" placeholder="Password" required />
+    <button type="submit">Login</button>
+  </form>
+
+  <h2>Create / Edit Post</h2>
+  <form id="postForm" style="display: none;">
+    <input type="text" id="title" placeholder="Post Title" required />
+    <textarea id="content" placeholder="Post Content" required></textarea>
+    <button type="submit" id="submitBtn">Save Post</button>
+  </form>
+
+  <h2>Posts</h2>
+  <div id="postList"></div>
+
+  <script>
+    let token = '';
+    let editingId = null;
+
+    async function fetchPosts() {
+      try {
+        const res = await fetch('/api/posts');
+        const posts = await res.json();
+        renderPosts(posts);
+      } catch (err) {
+        console.error("Error loading posts:", err);
+      }
+    }
+
+    function renderPosts(posts) {
+      const container = document.getElementById('postList');
+      container.innerHTML = '';
+
+      posts.forEach(post => {
+        const div = document.createElement('div');
+        div.className = 'post-card';
+        div.innerHTML = `
+          <h3>${post.title}</h3>
+          <p>${post.content}</p>
+          <div class="post-actions">
+            <button onclick="loadEdit('${post._id}', '${post.title}', '${post.content}')">Edit</button>
+            <button onclick="deletePost('${post._id}')">Delete</button>
+          </div>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('loginUser').value;
+      const password = document.getElementById('loginPass').value;
+
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (res.ok && data.token) {
+          token = data.token;
+          localStorage.setItem('token', token);
+          document.getElementById('loginForm').style.display = 'none';
+          document.getElementById('postForm').style.display = 'block';
+        } else {
+          alert(data.error || 'Invalid credentials');
+        }
+      } catch (err) {
+        console.error("Login failed:", err);
+        alert('Login failed');
+      }
+    });
+
+    document.getElementById('postForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const title = document.getElementById('title').value;
+      const content = document.getElementById('content').value;
+
+      try {
+        const res = await fetch(editingId ? `/api/posts/${editingId}` : '/api/posts', {
+          method: editingId ? 'PUT' : 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ title, content })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          alert(editingId ? 'Post updated!' : 'Post created!');
+          document.getElementById('title').value = '';
+          document.getElementById('content').value = '';
+          editingId = null;
+          document.getElementById('submitBtn').textContent = 'Save Post';
+          fetchPosts();
+        } else {
+          alert(data.message || 'Failed to save post');
+        }
+      } catch (err) {
+        console.error("Save failed:", err);
+      }
+    });
+
+    function loadEdit(id, title, content) {
+      document.getElementById('title').value = title;
+      document.getElementById('content').value = content;
+      editingId = id;
+      document.getElementById('submitBtn').textContent = 'Update Post';
+    }
+
+    async function deletePost(id) {
+      if (!confirm('Delete this post?')) return;
+      try {
+        const res = await fetch(`/api/posts/${id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        if (res.ok) {
+          fetchPosts();
+        } else {
+          alert('Failed to delete post');
+        }
+      } catch (err) {
+        console.error("Delete failed:", err);
+      }
+    }
+
+    // Load posts once the page is ready
+    fetchPosts();
+  </script>
+</body>
+</html>
