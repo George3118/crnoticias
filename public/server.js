@@ -10,47 +10,53 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
-// 🔗 MongoDB
+// 🔗 Connect MongoDB
 mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost/post_dashboard', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
   .then(() => console.log('✅ MongoDB connected'))
-  .catch(err => console.error('❌ MongoDB error:', err));
+  .catch(err => {
+    console.error('❌ MongoDB connection error:', err);
+    process.exit(1);
+  });
 
 // 📦 Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.resolve(__dirname, 'public')));
 
-// 🔐 Dummy Admin (replace with DB auth if needed)
+// 🧠 Post Model
+const postSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  content: { type: String, required: true }
+}, { timestamps: true });
+
+const Post = mongoose.model('Post', postSchema);
+
+// 🔐 Dummy Admin (Use DB-based user system for real apps)
 const ADMIN_USER = {
   username: 'jorge',
   passwordHash: bcrypt.hashSync('dashboard123', 10)
 };
 
-// 🧠 Models
-const postSchema = new mongoose.Schema({
-  title: String,
-  content: String
-});
-const Post = mongoose.model('Post', postSchema);
-
-// 🔐 JWT Middleware
+// 🔐 JWT Authentication Middleware
 function authenticate(req, res, next) {
-  const token = req.headers.authorization?.split(' ')[1];
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Missing token' });
+
   try {
     const decoded = jwt.verify(token, SECRET);
     req.user = decoded;
     next();
-  } catch {
+  } catch (err) {
     res.status(403).json({ error: 'Invalid token' });
   }
 }
 
-// 🚪 Login
+// 🚪 Login Route
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   if (
@@ -59,49 +65,54 @@ app.post('/api/login', async (req, res) => {
   ) {
     return res.status(403).json({ error: 'Invalid credentials' });
   }
+
   const token = jwt.sign({ username }, SECRET, { expiresIn: '2h' });
   res.json({ token });
 });
 
-// 📮 Create
+// 📮 Create Post
 app.post('/api/posts', authenticate, async (req, res) => {
   try {
     const post = await new Post(req.body).save();
-    res.json(post);
-  } catch {
-    res.status(500).json({ error: 'Post creation failed' });
+    res.status(201).json(post);
+  } catch (err) {
+    res.status(500).json({ error: 'Post creation failed', details: err.message });
   }
 });
 
-// 📚 Read
+// 📚 Get All Posts
 app.get('/api/posts', async (req, res) => {
   try {
-    const posts = await Post.find();
+    const posts = await Post.find().sort({ createdAt: -1 });
     res.json(posts);
-  } catch {
-    res.status(500).json({ error: 'Could not fetch posts' });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not fetch posts', details: err.message });
   }
 });
 
-// ✏️ Update
+// ✏️ Update Post
 app.put('/api/posts/:id', authenticate, async (req, res) => {
   try {
     const post = await Post.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!post) return res.status(404).json({ error: 'Post not found' });
     res.json(post);
-  } catch {
-    res.status(500).json({ error: 'Post update failed' });
+  } catch (err) {
+    res.status(500).json({ error: 'Post update failed', details: err.message });
   }
 });
 
-// 🗑️ Delete
+// 🗑️ Delete Post
 app.delete('/api/posts/:id', authenticate, async (req, res) => {
   try {
-    await Post.findByIdAndDelete(req.params.id);
+    const deleted = await Post.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Post not found' });
     res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: 'Post deletion failed' });
+  } catch (err) {
+    res.status(500).json({ error: 'Post deletion failed', details: err.message });
   }
 });
 
-// 🚀 Start
-app.listen(PORT, () => console.log(`✅ Server running at http://localhost:${PORT}`));
+// 🚀 Start Server
+app.listen(PORT, () => {
+  console.log(`✅ Server running at http://localhost:${PORT}`);
+});
